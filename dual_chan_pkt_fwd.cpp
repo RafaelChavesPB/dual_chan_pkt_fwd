@@ -466,7 +466,6 @@ void SendUdp(char *msg, int length)
   for (vector<Server_t>::iterator it = servers.begin(); it != servers.end(); ++it) {
     if (it->enabled) {
       si_other.sin_port = htons(it->port);
-
       SolveHostname(it->address.c_str(), it->port, &si_other);
       if (sendto(s, (char *)msg, length, 0 , (struct sockaddr *) &si_other, slen)==-1) {
         Die("sendto()");
@@ -475,118 +474,21 @@ void SendUdp(char *msg, int length)
   }
 }
 
-void SendStat()
-{
-  static char status_report[STATUS_SIZE]; /* status report as a JSON object */
-  char stat_timestamp[24];
-
-  int stat_index = 0;
-
-  digitalWrite(InternetLED, HIGH);
-  /* pre-fill the data buffer with fixed fields */
-  status_report[0] = PROTOCOL_VERSION;
-  status_report[3] = PKT_PUSH_DATA;
-
-  status_report[4] = (unsigned char)ifr.ifr_hwaddr.sa_data[0];
-  status_report[5] = (unsigned char)ifr.ifr_hwaddr.sa_data[1];
-  status_report[6] = (unsigned char)ifr.ifr_hwaddr.sa_data[2];
-  status_report[7] = 0xFF;
-  status_report[8] = 0xFF;
-  status_report[9] = (unsigned char)ifr.ifr_hwaddr.sa_data[3];
-  status_report[10] = (unsigned char)ifr.ifr_hwaddr.sa_data[4];
-  status_report[11] = (unsigned char)ifr.ifr_hwaddr.sa_data[5];
-
-  /* start composing datagram with the header */
-  uint8_t token_h = (uint8_t)rand(); /* random token */
-  uint8_t token_l = (uint8_t)rand(); /* random token */
-  status_report[1] = token_h;
-  status_report[2] = token_l;
-  stat_index = 12; /* 12-byte header */
-
-  /* get timestamp for statistics */
-  time_t t = time(NULL);
-  strftime(stat_timestamp, sizeof stat_timestamp, "%F %T %Z", gmtime(&t));
-
-  // Build JSON object.
-  StringBuffer sb;
-  Writer<StringBuffer> writer(sb);
-  writer.StartObject();
-  writer.String("stat");
-  writer.StartObject();
-  writer.String("time");
-  writer.String(stat_timestamp);
-  writer.String("lati");
-  writer.Double(lat);
-  writer.String("long");
-  writer.Double(lon);
-  writer.String("alti");
-  writer.Int(alt);
-  writer.String("rxnb");
-  writer.Uint(cp_nb_rx_rcv);
-  writer.String("rxok");
-  writer.Uint(cp_nb_rx_ok);
-  writer.String("rxfw");
-  writer.Uint(cp_up_pkt_fwd);
-  writer.String("ackr");
-  writer.Double(0);
-  writer.String("dwnb");
-  writer.Uint(0);
-  writer.String("txnb");
-  writer.Uint(0);
-  writer.String("pfrm");
-  writer.String(platform);
-  writer.String("mail");
-  writer.String(email);
-  writer.String("desc");
-  writer.String(description);
-  writer.EndObject();
-  writer.EndObject();
-
-  string json = sb.GetString();
-  //printf("stat update: %s\n", json.c_str());
-  printf("stat update: %s", stat_timestamp);
-  if (cp_nb_rx_ok_tot==0) {
-    printf(" no packet received yet\n");
-  } else {
-    printf(" %u packet%sreceived\n", cp_nb_rx_ok_tot, cp_nb_rx_ok_tot>1?"s ":" ");
-  }
-
-  // Build and send message.
-  memcpy(status_report + 12, json.c_str(), json.size());
-  SendUdp(status_report, stat_index + json.size());
-  digitalWrite(InternetLED, LOW);
-}
-
 bool Receivepacket(byte CE)
 {
   long int SNR;
   int rssicorr, dio_port;
   bool ret = false;
-
-  if (CE == 0)
-    {
-        dio_port = dio0;
-    } else {
-        dio_port = dio0_2;
-    }  
-
-  if (digitalRead(dio_port) == 1) {
-    char message[256];
+  if (digitalRead(dio0) == 1) {
+    char message[512];
+    memset(message, '\0', 512*sizeof(char));
     uint8_t length = 0;
     if (ReceivePkt(message, &length, CE)) {
-      // OK got one
       ret = true;
-
       uint8_t value = ReadRegister(REG_PKT_SNR_VALUE, CE);
 
-      if (CE == 0)
-            {
-              digitalWrite(ActivityLED_0, HIGH);
-            } else {
-              digitalWrite(ActivityLED_1, HIGH);
-           }  
 
-      if (value & 0x80) { // The SNR sign bit is 1
+        if (value & 0x80) { // The SNR sign bit is 1
         // Invert and divide by 4
         value = ((~value + 1) & 0xFF) >> 2;
         SNR = -value;
@@ -596,58 +498,13 @@ bool Receivepacket(byte CE)
       }
 
       rssicorr = sx1272 ? 139 : 157;
-
-      printf("CE%i Packet RSSI: %d, ", CE, ReadRegister(0x1A, CE) - rssicorr);
-      printf("RSSI: %d, ", ReadRegister(0x1B,CE) - rssicorr);
-      printf("SNR: %li, ", SNR);
-      printf("Length: %hhu Message:'", length);
-      for (int i=0; i<length; i++) {
-        char c = (char) message[i];
-        printf("%c",isprint(c)?c:'.');
-      }
-      printf("'\n");
-
       char buff_up[TX_BUFF_SIZE]; /* buffer to compose the upstream packet */
       int buff_index = 0;
-
-      /* gateway <-> MAC protocol variables */
-      //static uint32_t net_mac_h; /* Most Significant Nibble, network order */
-      //static uint32_t net_mac_l; /* Least Significant Nibble, network order */
-
-      /* pre-fill the data buffer with fixed fields */
-      buff_up[0] = PROTOCOL_VERSION;
-      buff_up[3] = PKT_PUSH_DATA;
-
-      /* process some of the configuration variables */
-      //net_mac_h = htonl((uint32_t)(0xFFFFFFFF & (lgwm>>32)));
-      //net_mac_l = htonl((uint32_t)(0xFFFFFFFF &  lgwm  ));
-      //*(uint32_t *)(buff_up + 4) = net_mac_h; 
-      //*(uint32_t *)(buff_up + 8) = net_mac_l;
-
-      buff_up[4] = (uint8_t)ifr.ifr_hwaddr.sa_data[0];
-      buff_up[5] = (uint8_t)ifr.ifr_hwaddr.sa_data[1];
-      buff_up[6] = (uint8_t)ifr.ifr_hwaddr.sa_data[2]; 
-      buff_up[7] = 0xFF;
-      buff_up[8] = 0xFF;
-      buff_up[9] = (uint8_t)ifr.ifr_hwaddr.sa_data[3];
-      buff_up[10] = (uint8_t)ifr.ifr_hwaddr.sa_data[4];
-      buff_up[11] = (uint8_t)ifr.ifr_hwaddr.sa_data[5];
-
-      /* start composing datagram with the header */
-      uint8_t token_h = (uint8_t)rand(); /* random token */
-      uint8_t token_l = (uint8_t)rand(); /* random token */
-      buff_up[1] = token_h;
-      buff_up[2] = token_l;
-      buff_index = 12; /* 12-byte header */
 
       // TODO: tmst can jump is time is (re)set, not good.
       struct timeval now;
       gettimeofday(&now, NULL);
       uint32_t tmst = (uint32_t)(now.tv_sec * 1000000 + now.tv_usec);
-
-      // Encode payload.
-      char b64[BASE64_MAX_LENGTH];
-      bin_to_b64((uint8_t*)message, length, b64, BASE64_MAX_LENGTH);
 
       // Build JSON object.
       StringBuffer sb;
@@ -658,36 +515,10 @@ bool Receivepacket(byte CE)
       writer.StartObject();
       writer.String("tmst");
       writer.Uint(tmst);
-      writer.String("freq");
-      if (CE == 0) {
-        writer.Double((double)freq / 1000000);
-        writer.String("chan");
-        writer.Uint(0);
-      } else {
-        writer.Double((double)freq_2 / 1000000);
-        writer.String("chan");
-        writer.Uint(1);
-      }
-      writer.String("rfch");
-      writer.Uint(0);
-      writer.String("stat");
-      writer.Uint(1);
-      writer.String("modu");
-      writer.String("LORA");
-      writer.String("datr");
-      char datr[] = "SFxxBWxxx";
-      snprintf(datr, strlen(datr) + 1, "SF%hhuBW%hu", sf, bw);
-      writer.String(datr);
-      writer.String("codr");
-      writer.String("4/5");
       writer.String("rssi");
       writer.Int(ReadRegister(0x1A, CE) - rssicorr);
-      writer.String("lsnr");
-      writer.Double(SNR); // %li.
-      writer.String("size");
-      writer.Uint(length);
       writer.String("data");
-      writer.String(b64);
+      writer.String(message);
       writer.EndObject();
       writer.EndArray();
       writer.EndObject();
@@ -696,9 +527,8 @@ bool Receivepacket(byte CE)
       printf("rxpk update: %s\n", json.c_str());
 
       // Build and send message.
-      memcpy(buff_up + 12, json.c_str(), json.size());
-      SendUdp(buff_up, buff_index + json.size());
-
+      memcpy(buff_up, json.c_str(), json.size());
+      SendUdp(buff_up, json.size());
       fflush(stdout);
     }
   }
@@ -764,70 +594,11 @@ int main()
   );
 
   printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq/1000000);
-  printf("Listening at SF%i on %.6lf Mhz.\n", sf,(double)freq_2/1000000);
   printf("-----------------------------------\n");
 
   while(1) {
-
-    // Packet received ?
-    if (Receivepacket(0)) {
-      // Led ON
-      if (ActivityLED_0 != 0xff) {
-        digitalWrite(ActivityLED_0, 1);
-      }
-
-      // start our Led blink timer, LED as been lit in Receivepacket
-      led0_timer=millis();
-    }
-    if (Receivepacket(1)) {
-      // Led ON
-      if (ActivityLED_1 != 0xff) {
-        digitalWrite(ActivityLED_1, 1);
-      }
-
-      // start our Led blink timer, LED as been lit in Receivepacket
-      led1_timer=millis();
-    }
-
-    gettimeofday(&nowtime, NULL);
-    uint32_t nowseconds = (uint32_t)(nowtime.tv_sec);
-    if (nowseconds - lasttime >= 30) {
-      lasttime = nowseconds;
-      SendStat();
-      cp_nb_rx_rcv = 0;
-      cp_nb_rx_ok = 0;
-      cp_up_pkt_fwd = 0;
-    }
-
-    // Led timer in progress ?
-    if (led0_timer) {
-      // Led timer expiration, Blink duration is 250ms
-      if (millis() - led0_timer >= 250) {
-        // Stop Led timer
-        led0_timer = 0;
-
-        // Led OFF
-        if (ActivityLED_0 != 0xff) {
-          digitalWrite(ActivityLED_0, 0);
-        }
-      }
-    }
-    if (led1_timer) {
-      // Led timer expiration, Blink duration is 250ms
-      if (millis() - led1_timer >= 250) {
-        // Stop Led timer
-        led1_timer = 0;
-
-        // Led OFF
-        if (ActivityLED_1 != 0xff) {
-          digitalWrite(ActivityLED_1, 0);
-        }
-      }
-    }
-
-
-    // Let some time to the OS
-    delay(1);
+    if (Receivepacket(0));
+    if (Receivepacket(1));
   }
 
   return (0);

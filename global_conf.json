@@ -25,19 +25,14 @@
     "email": "a@b.c",
     "desc": "Dual channel pkt forwarder",
 
-    "interface": "eth0",
+    "interface": "wlan0",
 
     "servers":
     [
       {
-        "address": "router.eu.staging.thethings.network",
-        "port": 1700,
+        "address": "127.0.0.1",
+        "port": 5005,
         "enabled": true
-      },
-      {
-        "address": "router.eu.thethings.network",
-        "port": 1700,
-        "enabled": false
       }
     ]
   }
