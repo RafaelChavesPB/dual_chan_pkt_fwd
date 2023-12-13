@@ -510,17 +510,12 @@ bool Receivepacket(byte CE)
       StringBuffer sb;
       Writer<StringBuffer> writer(sb);
       writer.StartObject();
-      writer.String("rxpk");
-      writer.StartArray();
-      writer.StartObject();
       writer.String("tmst");
       writer.Uint(tmst);
       writer.String("rssi");
       writer.Int(ReadRegister(0x1A, CE) - rssicorr);
       writer.String("data");
       writer.String(message);
-      writer.EndObject();
-      writer.EndArray();
       writer.EndObject();
 
       string json = sb.GetString();

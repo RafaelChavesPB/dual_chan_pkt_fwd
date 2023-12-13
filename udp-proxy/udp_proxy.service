@@ -1,0 +1,13 @@
+[Unit]
+Description=Proxy UDP For a LoRa Gateway
+After=syslog.target
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/pi/dual_chan_pkt_fwd/udp-proxy
+ExecStart=/home/pi/dual_chan_pkt_fwd/udp-proxy/proxy.py 
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

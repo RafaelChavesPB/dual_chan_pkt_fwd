@@ -1,0 +1,6 @@
+{
+	"rmq_host":"195.35.17.231",
+	"rmq_queue":"iot",
+	"udp_host": "0.0.0.0",
+	"udp_port":5005
+}
